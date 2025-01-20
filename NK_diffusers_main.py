@@ -42,7 +42,7 @@ if __name__ == "__main__":
     parser.add_argument('--sampler_steps', default=100, type=int, help='number of inference steps')
     parser.add_argument('--max_steps', default=1000, type=int, help='number of inference steps')
     parser.add_argument('--src_img_dir', default='./contents_2', type=str, help='directory containing source images')
-    parser.add_argument('--dst_img_dir', default='results/result_images', type=str, help='directory to save results')
+    parser.add_argument('--dst_img_dir', default='results/result_images_diffusers', type=str, help='directory to save results')
     args = parser.parse_args()
 
     model = UNet2DModel.from_pretrained(args.model)
@@ -50,69 +50,37 @@ if __name__ == "__main__":
     scheduler = DDIMScheduler.from_pretrained(args.model)
     scheduler.set_timesteps(num_inference_steps=args.sampler_steps)
 
-    # scheduler_inv = DDIMInverseScheduler.from_pretrained(repo_id)
-    # scheduler_inv.set_timesteps(num_inference_steps=100)
+    scheduler_inv = DDIMInverseScheduler.from_pretrained(args.model)
+    scheduler_inv.set_timesteps(num_inference_steps=args.sampler_steps)
 
     timesteps = reversed(scheduler.timesteps)
-
-    max_steps = len(scheduler.alphas_cumprod)
-    step_size = max_steps // args.sampler_steps
-    ddim_timesteps = np.array(range(step_size - 1, max_steps, step_size))
-    ddim_timesteps_prev = np.insert(ddim_timesteps[:-1], 0, 0) if args.sampler_steps < 1000 else ddim_timesteps
 
     for filename in os.listdir(args.src_img_dir):
         x = load_img(f'{args.src_img_dir}/{filename}')
         x = x.to("mps")
         sample = x
-        for i in range(args.sampler_steps):
+
+        for i, t in enumerate(tqdm.tqdm(scheduler_inv.timesteps[1:])):
             # 1. predict noise residual
-            t = timesteps[i]
+            timestep = t
+            timestep = min(
+            timestep - scheduler_inv.config.num_train_timesteps // scheduler_inv.num_inference_steps, scheduler_inv.config.num_train_timesteps - 1)
+            print(f"timestep: {timestep}")
             with torch.no_grad():
                 residual = model(sample, t).sample
 
-            current_t = ddim_timesteps_prev[i] #t
-            next_t = ddim_timesteps[i] # min(999, t.item() + (1000//num_inference_steps)) # t+1
-            alpha_t = scheduler.alphas_cumprod[current_t]
-            alpha_t_next = scheduler.alphas_cumprod[next_t]
             # 2. compute less noisy image and set x_t -> x_t-1
-            # sample = scheduler_inv.step(residual, t, sample).prev_sample
-            sample = (sample - (1-alpha_t).sqrt()*residual)*(alpha_t_next.sqrt()/alpha_t.sqrt()) + (1-alpha_t_next).sqrt()*residual
-            # x_dt = a_dt.sqrt() * x_t + ((1 - ab_dt - sig_t ** 2).sqrt() - (a_dt - ab_dt).sqrt()) * eps_t + sig_t * eps  # Eqn 12 of DDIM (classifier-guidance paper showed the eqn can be used for forward process too)
-
+            sample = scheduler_inv.step(residual, t, sample).prev_sample
             # save_sample(sample, t, filename, folder="results/results_fwd")
-        
-        for i in reversed(range(args.sampler_steps)):
+
+        for i, t in enumerate(tqdm.tqdm(scheduler.timesteps)):
             # 1. predict noise residual
-            t = ddim_timesteps[i]
             with torch.no_grad():
                 residual = model(sample, t).sample
 
-            prev_t = ddim_timesteps_prev[i] # t-1
-            alpha_t = scheduler.alphas_cumprod[t.item()]
-            alpha_t_prev = scheduler.alphas_cumprod[prev_t]
-            predicted_x0 = (sample - (1-alpha_t).sqrt()*residual) / alpha_t.sqrt()
-            direction_pointing_to_xt = (1-alpha_t_prev).sqrt()*residual
-            sample = alpha_t_prev.sqrt()*predicted_x0 + direction_pointing_to_xt
+            # 2. compute less noisy image and set x_t -> x_t-1
+            sample = scheduler.step(residual, t, sample).prev_sample
 
             save_sample(sample, t, filename, folder="results/results_inv")
 
-        # for i, t in enumerate(tqdm.tqdm(scheduler_inv.timesteps[1:])):
-        #     # 1. predict noise residual
-        #     with torch.no_grad():
-        #         residual = model(sample, t).sample
-
-        #     # 2. compute less noisy image and set x_t -> x_t-1
-        #     sample = scheduler_inv.step(residual, t, sample).prev_sample
-        #     save_sample(sample, t, filename, folder="results/results_fwd")
-
-        # for i, t in enumerate(tqdm.tqdm(scheduler.timesteps)):
-        #     # 1. predict noise residual
-        #     with torch.no_grad():
-        #         residual = model(sample, t).sample
-
-        #     # 2. compute less noisy image and set x_t -> x_t-1
-        #     sample = scheduler.step(residual, t, sample).prev_sample
-
-        #     save_sample(sample, t, filename, folder="results/results_inv")
-
-        # save_sample(sample, t, filename, folder=args.dst_img_dir)
+        save_sample(sample, t, filename, folder=args.dst_img_dir)
