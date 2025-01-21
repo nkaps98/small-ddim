@@ -40,6 +40,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', default='google/ddpm-cat-256', type=str, help='path to checkpoint of model')
     parser.add_argument('--sampler_steps', default=100, type=int, help='number of inference steps')
+    parser.add_argument('--img_size', default=256, type=int, help='Image size to input to model')
     parser.add_argument('--max_steps', default=1000, type=int, help='number of inference steps')
     parser.add_argument('--src_img_dir', default='./contents_2', type=str, help='directory containing source images')
     parser.add_argument('--dst_img_dir', default='results/result_images_diffusers', type=str, help='directory to save results')
@@ -56,16 +57,12 @@ if __name__ == "__main__":
     timesteps = reversed(scheduler.timesteps)
 
     for filename in os.listdir(args.src_img_dir):
-        x = load_img(f'{args.src_img_dir}/{filename}')
+        x = load_img(f'{args.src_img_dir}/{filename}', img_size=args.img_size)
         x = x.to("mps")
         sample = x
 
         for i, t in enumerate(tqdm.tqdm(scheduler_inv.timesteps[1:])):
             # 1. predict noise residual
-            timestep = t
-            timestep = min(
-            timestep - scheduler_inv.config.num_train_timesteps // scheduler_inv.num_inference_steps, scheduler_inv.config.num_train_timesteps - 1)
-            print(f"timestep: {timestep}")
             with torch.no_grad():
                 residual = model(sample, t).sample
 
