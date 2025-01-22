@@ -52,7 +52,7 @@ def md5_hash(path):
     return hashlib.md5(content).hexdigest()
 
 
-def get_ckpt_path(name, root=None, check=False):
+def get_ckpt_path(name, root='diffusion_models_converted', check=False):
     if 'church_outdoor' in name:
         name = name.replace('church_outdoor', 'church')
     assert name in URL_MAP

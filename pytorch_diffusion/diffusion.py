@@ -2,7 +2,7 @@ import numpy as np
 import torch
 
 from pytorch_diffusion.model import Model
-from pytorch_diffusion.ckpt_util import get_ckpt_path
+from functions.ckpt_util import get_ckpt_path
 
 
 def get_beta_schedule(beta_schedule, *, beta_start, beta_end, num_diffusion_timesteps):

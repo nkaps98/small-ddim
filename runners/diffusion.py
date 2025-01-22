@@ -8,8 +8,8 @@ import tqdm
 import torch
 import torch.utils.data as data
 
-from models.diffusion import Model
-from models.ema import EMAHelper
+from pytorch_diffusion.model import Model
+from pytorch_diffusion.ema import EMAHelper
 from functions import get_optimizer
 from functions.losses import loss_registry
 from datasets import get_dataset, data_transform, inverse_data_transform
