@@ -1,5 +1,4 @@
-from pytorch_diffusion import Diffusion
-from diffusers import DDIMPipeline, UNet2DModel, DDIMScheduler, DDIMInverseScheduler
+from diffusers import UNet2DModel, DDIMScheduler, DDIMInverseScheduler
 import torch
 from PIL import Image
 import numpy as np
@@ -38,7 +37,7 @@ def load_img(path, img_size=None):
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model', default='google/ddpm-cat-256', type=str, help='path to checkpoint of model')
+    parser.add_argument('--model', default='google/ddpm-ema-cat-256', type=str, help='path to checkpoint of model')
     parser.add_argument('--sampler_steps', default=100, type=int, help='number of inference steps')
     parser.add_argument('--img_size', default=256, type=int, help='Image size to input to model')
     parser.add_argument('--max_steps', default=1000, type=int, help='number of inference steps')
@@ -62,6 +61,8 @@ if __name__ == "__main__":
         scheduler.timesteps += (scheduler.config.num_train_timesteps - 1) - scheduler.timesteps[0]
 
     timesteps = reversed(scheduler.timesteps)
+    scheduler.config.clip_sample = False
+    scheduler_inv.config.clip_sample = False
 
     for filename in os.listdir(args.src_img_dir):
         x = load_img(f'{args.src_img_dir}/{filename}', img_size=args.img_size)
@@ -80,7 +81,7 @@ if __name__ == "__main__":
             sample = scheduler_inv.step(residual, t_fwd, sample).prev_sample
             # save_sample(sample, t, filename, folder="results/results_fwd")
 
-        for t_rev in enumerate(tqdm.tqdm(scheduler.timesteps)):
+        for t_rev in tqdm.tqdm(scheduler.timesteps):
             # 1. predict noise residual
             with torch.no_grad():
                 residual = model(sample, t_rev).sample
