@@ -1,4 +1,5 @@
-from pytorch_diffusion import Diffusion
+# from pytorch_diffusion import Diffusion
+from distutils.util import strtobool
 from diffusers import DDIMPipeline, UNet2DModel, DDIMScheduler, DDIMInverseScheduler
 import torch
 from PIL import Image
@@ -9,14 +10,14 @@ import numpy as np
 import os
 import argparse
 
-def save_sample(sample, i, filename, folder):
+def save_sample(sample, filename, folder):
     image_processed = sample.cpu().permute(0, 2, 3, 1)
     image_processed = (image_processed + 1.0) * 127.5
     image_processed = image_processed.numpy().astype(np.uint8)
 
     image_pil = PIL.Image.fromarray(image_processed[0])
     file, ext = os.path.splitext(filename)
-    image_pil.save(f'./{folder}/{file}_{i}.{ext}')
+    image_pil.save(f'./{folder}/{file}.{ext}')
     # image_pil.save('./results/dog.png')
 
 def load_img(path, img_size=None):
@@ -38,24 +39,38 @@ def load_img(path, img_size=None):
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model', default='google/ddpm-cat-256', type=str, help='path to checkpoint of model')
+    parser.add_argument('--model', default='google/ddpm-ema-cat-256', type=str, help='path to checkpoint of model')
     parser.add_argument('--sampler_steps', default=100, type=int, help='number of inference steps')
     parser.add_argument('--img_size', default=256, type=int, help='Image size to input to model')
     parser.add_argument('--max_steps', default=1000, type=int, help='number of inference steps')
+    parser.add_argument('--strength_fwd', default=1.0, type=float, help='Strength for noising. 1.0 corresponds to full destruction of information in init image')
+    parser.add_argument('--strength_rev', default=1.0, type=float, help='Strength for unnoising. 1.0 corresponds to full destruction of information in init image')
     parser.add_argument('--src_img_dir', default='./contents_2', type=str, help='directory containing source images')
     parser.add_argument('--dst_img_dir', default='results/result_images_diffusers', type=str, help='directory to save results')
+    parser.add_argument('--out_dir', default='results', type=str, help='directory to save step results')
+    parser.add_argument('--save_streamlines', default=False, type=lambda x: bool(strtobool(x)), help='Whether to save out every step of the diffusion latents.')
+    parser.add_argument('--save_sample', default=False, type=lambda x: bool(strtobool(x)), help='Whether to save initial sample')
     args = parser.parse_args()
 
     model = UNet2DModel.from_pretrained(args.model)
-    model.to("mps")
+    model.to("cuda")
 
-    scheduler_inv = DDIMInverseScheduler.from_pretrained(args.model)
+    if args.save_sample:
+        init_path = os.path.join(args.out_dir, 'Lat_Init')
+        os.makedirs(init_path, exist_ok=True)
+    if args.save_streamlines:
+        i2n_path = os.path.join(args.out_dir, 'Lat_I2N')
+        os.makedirs(i2n_path, exist_ok=True)
+        n2i_path = os.path.join(args.out_dir, 'Lat_N2I')
+        os.makedirs(n2i_path, exist_ok=True)
+
+    scheduler_inv = DDIMInverseScheduler(clip_sample=False).from_pretrained(args.model)
     scheduler_inv.set_timesteps(num_inference_steps=args.sampler_steps)
     if len(scheduler_inv.timesteps) < scheduler_inv.config.num_train_timesteps:
         # Shift schedule to encompass full timestep range
         scheduler_inv.timesteps += (scheduler_inv.config.num_train_timesteps - 1) - scheduler_inv.timesteps[-1]
 
-    scheduler = DDIMScheduler.from_pretrained(args.model)
+    scheduler = DDIMScheduler(clip_sample=False).from_pretrained(args.model)
     scheduler.set_timesteps(num_inference_steps=args.sampler_steps)
     if len(scheduler.timesteps) < scheduler.config.num_train_timesteps:
         # Shift schedule to encompass full timestep range
@@ -63,11 +78,17 @@ if __name__ == "__main__":
 
     timesteps = reversed(scheduler.timesteps)
 
+    scheduler.config.clip_sample = False
+    scheduler_inv.config.clip_sample = False
+
     for filename in os.listdir(args.src_img_dir):
         x = load_img(f'{args.src_img_dir}/{filename}', img_size=args.img_size)
-        x = x.to("mps")
+        x = x.to("cuda")
         sample = x
 
+        torch.save(sample.detach().cpu(), os.path.join(init_path, filename + '_init_latent.pt'))
+
+        i2nList = []
         for t_fwd in tqdm.tqdm(scheduler_inv.timesteps):
             # 1. predict noise residual
             with torch.no_grad():
@@ -78,16 +99,25 @@ if __name__ == "__main__":
 
             # 2. compute less noisy image and set x_t -> x_t-1
             sample = scheduler_inv.step(residual, t_fwd, sample).prev_sample
-            # save_sample(sample, t, filename, folder="results/results_fwd")
+            i2nList.append(sample.cpu())
+            if args.save_sample:
+                torch.save(sample.cpu(), os.path.join(i2n_path, filename + '_i2n_final_fwd.pt'))
 
-        for t_rev in enumerate(tqdm.tqdm(scheduler.timesteps)):
+        n2iList = []
+        for t_rev in tqdm.tqdm(scheduler.timesteps):
             # 1. predict noise residual
             with torch.no_grad():
                 residual = model(sample, t_rev).sample
 
             # 2. compute less noisy image and set x_t -> x_t-1
             sample = scheduler.step(residual, t_rev, sample).prev_sample
+            n2iList.append(sample)
+    
+        if args.save_streamlines:
+            torch.save(torch.stack(i2nList), os.path.join(i2n_path, filename + '_i2n_sl_fwd.pt'))
+            torch.save(torch.stack(n2iList), os.path.join(n2i_path, filename + '_n2i_sl_rev.pt'))
+        
+        if args.save_sample:
+            torch.save(sample.cpu(), os.path.join(n2i_path, filename + '_n2i_final_rev.pt'))
 
-            save_sample(sample, t_rev, filename, folder="results/results_inv")
-
-        save_sample(sample, t_rev, filename, folder=args.dst_img_dir)
+        save_sample(sample, filename, folder=args.dst_img_dir)
