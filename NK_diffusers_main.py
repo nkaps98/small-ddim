@@ -1,6 +1,4 @@
-# from pytorch_diffusion import Diffusion
-from distutils.util import strtobool
-from diffusers import DDIMPipeline, UNet2DModel, DDIMScheduler, DDIMInverseScheduler
+from diffusers import UNet2DModel, DDIMScheduler, DDIMInverseScheduler
 import torch
 from PIL import Image
 import numpy as np
@@ -77,6 +75,8 @@ if __name__ == "__main__":
         scheduler.timesteps += (scheduler.config.num_train_timesteps - 1) - scheduler.timesteps[0]
 
     timesteps = reversed(scheduler.timesteps)
+    scheduler.config.clip_sample = False
+    scheduler_inv.config.clip_sample = False
 
     scheduler.config.clip_sample = False
     scheduler_inv.config.clip_sample = False
