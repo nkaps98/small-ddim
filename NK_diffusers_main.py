@@ -50,6 +50,9 @@ if __name__ == "__main__":
     parser.add_argument('--out_dir', default='results', type=str, help='directory to save step results')
     parser.add_argument('--save_streamlines', default=False, type=lambda x: bool(strtobool(x)), help='Whether to save out every step of the diffusion latents.')
     parser.add_argument('--save_sample', default=False, type=lambda x: bool(strtobool(x)), help='Whether to save initial sample')
+    parser.add_argument('--init_latent_dir', default='init_latent/', type=str, help='init latent directory')
+    parser.add_argument('--i2n_latent_dir', default='i2n_latent/', type=str, help='i2n latent directory')
+    parser.add_argument('--n2i_latent_dir', default='n2i_latent/', type=str, help='n2i latent directory')
     args = parser.parse_args()
 
     model = UNet2DModel.from_pretrained(args.model)
@@ -66,13 +69,13 @@ if __name__ == "__main__":
         n2i_path = os.path.join(args.out_dir, 'Lat_N2I')
         os.makedirs(n2i_path, exist_ok=True)
 
-    scheduler_inv = DDIMInverseScheduler(clip_sample=False).from_pretrained(args.model)
+    scheduler_inv = DDIMInverseScheduler.from_pretrained(args.model)
     scheduler_inv.set_timesteps(num_inference_steps=args.sampler_steps)
     if len(scheduler_inv.timesteps) < scheduler_inv.config.num_train_timesteps:
         # Shift schedule to encompass full timestep range
         scheduler_inv.timesteps += (scheduler_inv.config.num_train_timesteps - 1) - scheduler_inv.timesteps[-1]
 
-    scheduler = DDIMScheduler(clip_sample=False).from_pretrained(args.model)
+    scheduler = DDIMScheduler.from_pretrained(args.model)
     scheduler.set_timesteps(num_inference_steps=args.sampler_steps)
     if len(scheduler.timesteps) < scheduler.config.num_train_timesteps:
         # Shift schedule to encompass full timestep range
@@ -82,8 +85,12 @@ if __name__ == "__main__":
     scheduler.config.clip_sample = False
     scheduler_inv.config.clip_sample = False
 
-    scheduler.config.clip_sample = False
-    scheduler_inv.config.clip_sample = False
+    assert 0. <= args.strength_fwd <= 1., 'Can only work with strength in [0.0, 1.0]'
+    assert 0. <= args.strength_rev <= 1., 'Can only work with strength in [0.0, 1.0]'
+    assert args.strength_fwd * args.sampler_steps % 1 == 0, 'Ensure that denoising strength aligns with timestep indexing'
+    assert args.strength_rev * args.sampler_steps % 1 == 0, 'Ensure that denoising strength aligns with timestep indexing'
+    n_steps_fwd = int(args.strength_fwd * args.sampler_steps)
+    n_steps_rev = int(args.strength_rev * args.sampler_steps)
 
     assert 0. <= args.strength_fwd <= 1., 'Can only work with strength in [0.0, 1.0]'
     assert 0. <= args.strength_rev <= 1., 'Can only work with strength in [0.0, 1.0]'
@@ -135,8 +142,3 @@ if __name__ == "__main__":
             torch.save(sample.cpu(), os.path.join(final_path, filename + '_n2i_final_rev.pt'))
 
         save_sample(sample, filename, folder=args.dst_img_dir)
-
-    i2n_sls, n2i_sls, i2n_dist, n2i_dist, i2i_dist = load_ddim_sls(i2n_dir='./results/Lat_I2N',n2i_dir= './results/Lat_N2I', compute_dists=True)
-    print(i2i_dist)
-    print(n2i_dist)
-    print(i2n_dist)
