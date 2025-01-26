@@ -7,7 +7,6 @@ import PIL.Image
 import numpy as np
 import os
 import argparse
-from misc_utils import load_ddim_sls
 from distutils.util import strtobool
 
 def save_sample(sample, filename, folder):
@@ -17,7 +16,7 @@ def save_sample(sample, filename, folder):
 
     image_pil = PIL.Image.fromarray(image_processed[0])
     file, ext = os.path.splitext(filename)
-    image_pil.save(f'./{folder}/{file}.{ext}')
+    image_pil.save(f'./{folder}/{file}_reconstr_img{ext}')
     # image_pil.save('./results/dog.png')
 
 def load_img(path, img_size=None):
@@ -46,13 +45,9 @@ if __name__ == "__main__":
     parser.add_argument('--strength_fwd', default=1.0, type=float, help='Strength for noising. 1.0 corresponds to full destruction of information in init image')
     parser.add_argument('--strength_rev', default=1.0, type=float, help='Strength for unnoising. 1.0 corresponds to full destruction of information in init image')
     parser.add_argument('--src_img_dir', default='./contents_2', type=str, help='directory containing source images')
-    parser.add_argument('--dst_img_dir', default='results/result_images_diffusers', type=str, help='directory to save results')
-    parser.add_argument('--out_dir', default='results', type=str, help='directory to save step results')
+    parser.add_argument('--out_dir', default='results/experiment1', type=str, help='directory to save step results')
     parser.add_argument('--save_streamlines', default=False, type=lambda x: bool(strtobool(x)), help='Whether to save out every step of the diffusion latents.')
     parser.add_argument('--save_sample', default=False, type=lambda x: bool(strtobool(x)), help='Whether to save initial sample')
-    parser.add_argument('--init_latent_dir', default='init_latent/', type=str, help='init latent directory')
-    parser.add_argument('--i2n_latent_dir', default='i2n_latent/', type=str, help='i2n latent directory')
-    parser.add_argument('--n2i_latent_dir', default='n2i_latent/', type=str, help='n2i latent directory')
     args = parser.parse_args()
 
     model = UNet2DModel.from_pretrained(args.model)
@@ -61,8 +56,10 @@ if __name__ == "__main__":
     if args.save_sample:
         init_path = os.path.join(args.out_dir, 'Lat_Init')
         os.makedirs(init_path, exist_ok=True)
-        final_path = os.path.join(args.out_dir, 'Lat_Final')
-        os.makedirs(final_path, exist_ok=True)
+        final_i2n_path = os.path.join(args.out_dir, 'Lat_I2N_Final')
+        os.makedirs(final_i2n_path, exist_ok=True)
+        final_n2i_path = os.path.join(args.out_dir, 'Lat_N2I_Final')
+        os.makedirs(final_n2i_path, exist_ok=True)
     if args.save_streamlines:
         i2n_path = os.path.join(args.out_dir, 'Lat_I2N')
         os.makedirs(i2n_path, exist_ok=True)
@@ -120,13 +117,13 @@ if __name__ == "__main__":
             sample = scheduler_inv.step(residual, t_fwd, sample).prev_sample
             i2nList.append(sample.cpu())
             if args.save_sample:
-                torch.save(sample.cpu(), os.path.join(final_path, filename + '_i2n_final_fwd.pt'))
+                torch.save(sample.cpu(), os.path.join(final_i2n_path, filename + '_i2n_final_fwd.pt'))
 
         n2iList = [sample.detach().cpu()]
 
-        for i in tqdm.tqdm(range(n_steps_rev)):
+        for i in tqdm.tqdm(reversed(range(n_steps_rev))):
             # 1. predict noise residual
-            t_rev = scheduler.timesteps[i]
+            t_rev = scheduler.timesteps[-(i+1)]
             with torch.no_grad():
                 residual = model(sample, t_rev).sample
 
@@ -139,6 +136,6 @@ if __name__ == "__main__":
             torch.save(torch.stack(n2iList), os.path.join(n2i_path, filename + '_n2i_sl_rev.pt'))
         
         if args.save_sample:
-            torch.save(sample.cpu(), os.path.join(final_path, filename + '_n2i_final_rev.pt'))
+            torch.save(sample.cpu(), os.path.join(final_n2i_path, filename + '_n2i_final_rev.pt'))
 
-        save_sample(sample, filename, folder=args.dst_img_dir)
+        save_sample(sample, filename, folder=args.out_dir)
